@@ -414,17 +414,33 @@ def respond_to_feedback(state: ReviewBot) -> ReviewBot:
         return state
     
     code_context = ""
-    for change in state.get("code_changes",[])[:2]:
-        code_context += f"File: {change['file_path']}\n{change['new_code'][:300]}...\n\n"
+    file_names = []
+    for change in state.get("code_changes",[])[:3]:
+        file_names.append(change['file_path'])
+        code_context += f"File: {change['file_path']}\n{change['new_code'][:400]}...\n\n"
 
-    prompt = f"""User feedback: "{human_feedback}"
+    prompt = f"""The user is asking about their AI Code Reviewer system. Here's their feedback: "{human_feedback}"
 
-Original code:
+CURRENT SYSTEM FILES BEING REVIEWED:
 {code_context}
 
-Current review comments: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
+FILES IN THIS REVIEW: {file_names}
 
-Provide a helpful response addressing their feedback. Be specific and actionable."""
+CURRENT REVIEW COMMENTS: {[c['comment'] for c in state.get('review_comments', [])[:5]]}
+
+The user seems to be asking about:
+- Whether their system makes multiple LLM calls
+- How the human feedback loop works  
+- Whether their nodes.py and main.py are working correctly
+- Technical details about their workflow
+
+Provide a technical response addressing their specific question about the system architecture and workflow. Be specific about:
+1. How many LLM calls are made
+2. The workflow sequence
+3. Whether the feedback loop is working as expected
+4. Any technical issues you notice
+
+Focus on answering their technical question directly."""
     
     try:
         response = llm.invoke(prompt).content
