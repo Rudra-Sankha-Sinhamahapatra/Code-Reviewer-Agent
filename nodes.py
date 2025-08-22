@@ -3,7 +3,8 @@ import json
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from rich.console import Console
-from utils import ReviewBot, CodeChange, ReviewComment
+from utils import ReviewBot, ReviewComment
+import re
 
 load_dotenv()
 
@@ -24,14 +25,16 @@ def analyze_code_changes(state: ReviewBot) -> ReviewBot:
 
 
     changes_text = ""
-    for change in state["code_changes"]:
-        changes_text += f"\nFile: {change['file_path']}:{change['line_number']}\n"
-        changes_text += f"Type: {change['change_type']}\n"
-        changes_text += f"Old: {change['old_code']}\n"
-        changes_text += f"New: {change['new_code']}\n"
-        changes_text += "-" * 50 + "\n"
+    for i, change in enumerate(state["code_changes"][:4]): #Limit is 4, only it will review first 4 files
+        new_code = change['new_code']
+        if len(new_code) > 800:
+            new_code = new_code[:800] + "\n.. (truncated)"
 
-    prompt = f"""Analyze these code changes as an expert code reviewer.
+        changes_text += f"\nFile {i+1}: {change['file_path']}\n"
+        changes_text += f"Code:\n{new_code}\n"
+        changes_text += "-" * 40 + "\n"
+
+    prompt = f"""You are an expert code reviewer in the Industry who only returns JSON object
 
 CODE CHANGES:
 {changes_text}
@@ -61,70 +64,88 @@ IMPORTANT: You must respond with ONLY valid JSON in the exact format below. Do n
             "category": "best_practice"
         }}
     ],
-    "overall_assessment": "Overall good changes with room for improvement",
-    "priority_issues": ["List of high-priority issues"]
+    "overall_assessment": "Overall good changes with room for improvement"
 }}"""
 
     try:
         response = llm.invoke(prompt).content
-        
-        # Debug:  the raw response to see what we're getting
         console.print(f"[dim]Raw AI response length: {len(response)} characters[/dim]")
         
-       
-        json_start = response.find("{")
-        json_end = response.rfind("}") + 1
-        
-        if json_start != -1 and json_end != -1:
-            json_str = response[json_start:json_end]
-            console.print(f"[dim]Extracted JSON preview: {json_str[:100].replace('[', '\\[').replace(']', '\\]')}...[/dim]")
-            
+        json_data = None
+
+        # Strategy 1: Look for complete JSON object
+        if response.startswith('{') and response.endswith('}'):
             try:
-                analysis = json.loads(json_str)
-            except json.JSONDecodeError as json_error:
-                console.print(f"[yellow]JSON parsing failed, trying to clean response...[/yellow]")
-               
-                cleaned_json = json_str.replace("'", '"').replace('\n', ' ').strip()
-                
-                # If still fails, try extracting just the comments manually
+                json_data = json.loads(response)
+            except:
+                pass
+        
+         # Strategy 2: Find JSON between braces
+        if not json_data:
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start != -1 and end > start:
+                json_str = response[start:end]
                 try:
-                    analysis = json.loads(cleaned_json)
-                except json.JSONDecodeError:
-                    console.print(f"[red]Failed to parse JSON. Creating manual analysis...[/red]")
-
-                    analysis = {
-                        "comments": [],
-                        "overall_assessment": "Analysis completed but JSON parsing failed. Code appears to have issues that need manual review."
+                    json_data = json.loads(json_str)
+                except:
+                    # Strategy 3: Clean common issues
+                    cleaned = json_str.replace("'", '"').replace('\n', ' ')
+                    try:
+                        json_data = json.loads(cleaned)
+                    except:
+                        pass
+        
+         # Strategy 4: Use regex to extract JSON-like content
+        if not json_data:
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            matches = re.findall(json_pattern, response, re.DOTALL)
+            for match in matches:
+                try:
+                    json_data = json.loads(match)
+                    break
+                except:
+                    continue
+        
+         # If all fails, create a simple analysis
+        if not json_data:
+            console.print("[yellow]Could not parse JSON, creating manual analysis[/yellow]")
+            json_data = {
+                "comments": [
+                    {
+                        "file_path": "analysis",
+                        "line_number": 1,
+                        "comment": "AI returned unparseable response - manual review recommended",
+                        "severity": "low",
+                        "category": "general"
                     }
+                ],
+                "overall_assessment": "Analysis completed with parsing issues"
+            }
+        
+        comments = []
+        for comment_data in json_data.get("comments", []):
+            try:
+                comment = ReviewComment(
+                    file_path=comment_data.get("file_path", "unknown"),
+                    line_number=comment_data.get("line_number", 1),
+                    comment=comment_data.get("comment", "No comment"),
+                    severity=comment_data.get("severity", "medium"),
+                    category=comment_data.get("category", "general")
+                )
+                comments.append(comment)
+            except Exception as e:
+                console.print(f"[dim]Skipping malformed comment: {e}[/dim]")
 
-            comments = []
-            for comment_data in analysis.get("comments", []):
-                try:
-                    comment = ReviewComment(
-                        file_path=comment_data.get("file_path", "unknown"),
-                        line_number=comment_data.get("line_number", 1),
-                        comment=comment_data.get("comment", "No comment provided"),
-                        severity=comment_data.get("severity", "medium"),
-                        category=comment_data.get("category", "general")
-                    )
-                    comments.append(comment)
-                except Exception as comment_error:
-                    console.print(f"[yellow]Skipping malformed comment: {comment_error}[/yellow]")
-
-            state["review_comments"] = comments
-            state["summary"] = analysis.get("overall_assessment", "Analysis completed")
-
-            console.print(f"[green]Analysis complete! Found {len(comments)} issues[/green]")
-        else:
-            console.print(f"[yellow]No JSON found in response. Raw response: {response[:200]}...[/yellow]")
-            state["summary"] = "Analysis completed but no structured results were returned."
+        state["review_comments"] = comments
+        state["summary"] = json_data.get("overall_assessment", "Analysis completed")
+        
+        console.print(f"[green]Analysis complete! Found {len(comments)} issues[/green]")
 
     except Exception as e:
-        console.print(f"[red]Error in analysis: {e}[/red]")
-        console.print(f"[dim]Full error details: {str(e)}[/dim]")
-        #  a default state even if everything fails
+        console.print(f"[red]Analysis error: {e}[/red]")
         state["review_comments"] = []
-        state["summary"] = f"Analysis failed due to error: {str(e)}"
+        state["summary"] = "Analysis failed due to technical issues"
     
     return state
 
@@ -219,10 +240,18 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
         for line_num, line in enumerate(lines, 1):
             line_lower = line.lower().strip()
             
+            #Skip empty lines or comments
+            if not line_lower or line_lower.startswith('#') or line_lower.startswith('//'):
+                continue
+            
+            secret_indicators = ['password', 'api_key', 'secret_key', 'token', 'apikey']
             # Check for hardcoded secrets
-            if any(secret in line_lower for secret in ['password', 'api_key', 'secret', 'token']):
+            if any(secret in line_lower for secret in secret_indicators):
                 if '=' in line and any(quote in line for quote in ['"', "'"]):
-                    security_issues.append({
+                    value_part = line.split('=',1)[1].strip()
+
+                    if not any(skip in value_part.lower() for skip in ['getenv', 'env.', 'process.env', 'config.', '${', 'none', 'null', '""', "''"]):
+                      security_issues.append({
                         "file": file_path,
                         "line": line_num,
                         "issue": "Potential hardcoded secret detected",
@@ -230,33 +259,40 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
                     })
             
             # Check for SQL injection patterns
-            if 'select * from' in line_lower or 'insert into' in line_lower:
-                if 'format(' in line_lower or '{' in line:
-                    security_issues.append({
-                        "file": file_path,
-                        "line": line_num,
-                        "issue": "Potential SQL injection vulnerability",
-                        "severity": "critical"
-                    })
+            sql_keywords = ['select ', 'insert ', 'update ', 'delete ', 'drop ', 'create ']
+            if any(sql in line_lower for sql in sql_keywords):
+                # Only flag if there's string formatting or concatenation
+                if any(pattern in line for pattern in ['f"', "f'", '.format(', '%s', '%d', '+ ', '+=']):
+                    # Skip if using parameterized queries
+                    if not any(safe in line_lower for safe in ['execute(', 'prepare(', '?', ':param']):
+                        security_issues.append({
+                            "file": file_path,
+                            "line": line_num,
+                            "issue": "Potential SQL injection - use parameterized queries",
+                            "severity": "critical"
+                        })
             
             # Check for unsafe file operations
-            if 'open(' in line_lower and 'w' in line:
-                if '/tmp/' in line_lower or '../' in line_lower:
+            unsafe_functions = ['eval(', 'exec(', 'compile(']
+            if any(func in line_lower for func in unsafe_functions):
+                # Skip if it's in comments or strings
+                if not any(marker in line for marker in ['#', '//', '"""', "'''"]):
                     security_issues.append({
                         "file": file_path,
                         "line": line_num,
-                        "issue": "Unsafe file path detected",
-                        "severity": "medium"
+                        "issue": f"Unsafe code execution function detected: {line.strip()[:50]}...",
+                        "severity": "high"
                     })
             
-     
-            if any(func in line_lower for func in ['eval(', 'exec(', 'compile(']):
-                security_issues.append({
-                    "file": file_path,
-                    "line": line_num,
-                    "issue": "Unsafe code execution function detected",
-                    "severity": "high"
-                })
+            # File path traversal detection
+            if any(pattern in line_lower for pattern in ['../', '../', '..\\', 'traversal']):
+                if 'open(' in line_lower or 'file(' in line_lower:
+                    security_issues.append({
+                        "file": file_path,
+                        "line": line_num,
+                        "issue": "Potential path traversal vulnerability",
+                        "severity": "medium"
+                    })
     
 
     for issue in security_issues:
