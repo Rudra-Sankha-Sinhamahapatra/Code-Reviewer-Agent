@@ -170,33 +170,9 @@ Choose an option:
 
 Our AI Code Reviewer follows this workflow:
 
-```
-┌─────────────────┐
-│  Code Changes   │
-│   (GitHub)      │
-└─────────┬───────┘
-          ▼
-┌─────────────────┐
-│ analyze_changes │  ← AI analyzes code quality, complexity, docs
-└─────────┬───────┘
-          ▼
-┌─────────────────┐
-│detect_patterns  │  ← Finds anti-patterns and good practices
-└─────────┬───────┘
-          ▼
-┌─────────────────┐
-│security_check   │  ← Scans for vulnerabilities and secrets
-└─────────┬───────┘
-          ▼
-┌─────────────────┐
-│generate_feedback│  ← Creates comprehensive report
-└─────────┬───────┘
-          ▼
-┌─────────────────┐
-│   Final Report  │
-│  (Categorized)  │
-└─────────────────┘
-```
+<img src="docs/images/arc.png" width="500" height="746" alt="AI Code Reviewer Architecture Flowchart" />
+
+The architecture shows the complete flow from GitHub code analysis through AI-powered review stages to final user satisfaction.
 
 ### Workflow Components
 
