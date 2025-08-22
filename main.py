@@ -74,21 +74,31 @@ def run_github_review(repo_name: str, branch: str = "main") -> dict:
         # Convert to our format
         code_changes = []
         for file in files:
-            if file["content"] and file["path"].endswith(('.py', '.js', '.java', '.cpp', '.c', '.h')):
+            if file["content"] and file["path"].endswith(('.py', '.js','.ts', '.java', '.cpp', '.c', '.h','.rs')):
+                # Limit file size to prevent overwhelming the AI (max 2000 characters per file)
+                content = file["content"]
+                if len(content) > 2000:
+                    content = content[:2000] + "\n... (file truncated for analysis)"
+                
                 code_changes.append({
                     "file_path": file["path"],
                     "line_number": 1,
                     "old_code": "",
-                    "new_code": file["content"],
+                    "new_code": content,
                     "change_type": "addition"
                 })
+        
+        # Limit total number of files to analyze (max 5 files)
+        if len(code_changes) > 5:
+            console.print(f"[yellow]Limiting analysis to first 5 files (found {len(code_changes)} total)[/yellow]")
+            code_changes = code_changes[:5]
         
         console.print(f"[green]✓ Analyzing {len(code_changes)} code files[/green]")
         
         return run_code_review(code_changes)
         
     except Exception as e:
-        console.print(f"[red]Error accessing GitHub: {e}[/red]")
+        console.print(f"[red]Error accessing GitHub: {str(e).replace('[', '\\[').replace(']', '\\]')}[/red]")
         return None
 
 
