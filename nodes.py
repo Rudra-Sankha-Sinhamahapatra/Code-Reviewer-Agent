@@ -457,18 +457,19 @@ def respond_to_feedback(state: ReviewBot) -> ReviewBot:
         FILES: {file_names}
         REVIEW FINDINGS: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
 
-        SYSTEM INFO:
-        - This is a generic AI code reviewer for any programming language
-        - Workflow: Initial analysis → Human feedback loop → AI responses until satisfied
+       
+        CONTEXT:
+        - This is a code reviewer for any programming language/github repository
         - Current feedback round: {state.get('feedback_rounds', 1)}
-        - I analyze user feedback in 2 steps: summarize intent → generate response
+        - User can ask questions about their code, request specific analysis, or ask for clarifications
 
-        Based on the user's request, provide a helpful, specific answer. If they're asking about:
-        - System workflow: Explain the feedback loop clearly
-        - Code issues: Focus on the specific files and languages being reviewed  
-        - Clarification: Answer their exact question
+        IMPORTANT INSTRUCTIONS:
+        - DO NOT mention any internal processing steps
+        - Focus ONLY on answering their specific question about their code/review
+        - If they ask about workflow of a code or project, explain what THEY see 
+        - If they ask about their specific code, analyze the files they're reviewing
 
-        Be direct and helpful. Work with any programming language."""
+        Based on the user's request, provide a helpful, direct answer focused on their code and review."""
 
         response = llm.invoke(main_prompt).content
         state["followup_response"] = response
