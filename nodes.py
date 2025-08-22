@@ -3,6 +3,8 @@ import json
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
 from utils import ReviewBot, ReviewComment
 import re
 
@@ -378,5 +380,56 @@ def generate_review_feedback(state: ReviewBot) -> ReviewBot:
     state["suggestions"] = suggestions
     
     console.print(f"[green]Feedback generation complete! Generated {len(suggestions)} actionable suggestions[/green]")
+    
+    return state
+
+def collect_human_feedback(state: ReviewBot) -> ReviewBot:
+    """Collect feedback from human user"""
+    console.print("[bold cyan]Requesting human feedback...[/bold cyan]")
+    
+    # Show current results
+    console.print(Panel(
+        state.get('summary', 'No summary generated'),
+        title="[bold]AI Review Results[/bold]",
+        border_style="green"
+    ))
+
+    console.print("\n[bold yellow]Your feedback (or 'done' to finish):[/bold yellow]")
+    human_feedback = Prompt.ask("Enter your feedback")
+
+    state["human_feedback"] = human_feedback
+    user_satisfied_array = ['done', 'good', 'satisfied', 'fine', 'end']
+    state["user_satisfied"] = human_feedback.lower() in user_satisfied_array
+
+    return state
+
+def respond_to_feedback(state: ReviewBot) -> ReviewBot:
+    """Generate AI response to human feedback"""
+    console.print("[bold cyan]Processing your feedback...[/bold cyan]")
+
+    human_feedback = state.get("human_feedback","")
+
+    if state.get("user_satisfied"):
+        state["followup_response"] = "✅ Review completed successfully!"
+        return state
+    
+    code_context = ""
+    for change in state.get("code_changes",[])[:2]:
+        code_context += f"File: {change['file_path']}\n{change['new_code'][:300]}...\n\n"
+
+    prompt = f"""User feedback: "{human_feedback}"
+
+Original code:
+{code_context}
+
+Current review comments: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
+
+Provide a helpful response addressing their feedback. Be specific and actionable."""
+    
+    try:
+        response = llm.invoke(prompt).content
+        state["followup_response"] = response
+    except Exception as e:
+        state["followup_response"] = f"Sorry, I couldn't process your feedback: {e}"
     
     return state

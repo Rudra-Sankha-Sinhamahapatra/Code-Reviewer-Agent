@@ -7,7 +7,9 @@ from nodes import (
     analyze_code_changes,
     detect_code_patterns,
     check_security_issues,
-    generate_review_feedback
+    generate_review_feedback,
+    collect_human_feedback,
+    respond_to_feedback
 )
 from rich.console import Console
 from rich.panel import Panel
@@ -25,14 +27,27 @@ def create_review_graph():
     graph.add_node("detect_patterns", detect_code_patterns)
     graph.add_node("security_check", check_security_issues)
     graph.add_node("generate_feedback", generate_review_feedback)
+    graph.add_node("collect_feedback", collect_human_feedback)  
+    graph.add_node("respond_feedback", respond_to_feedback)  
 
     # Flow
     graph.set_entry_point("analyze_changes")
     graph.add_edge("analyze_changes","detect_patterns")
     graph.add_edge("detect_patterns", "security_check")
     graph.add_edge("security_check","generate_feedback")
-    graph.add_edge("generate_feedback", END)
+    graph.add_edge("generate_feedback", "collect_feedback") 
 
+   # Conditional edge: if satisfied -> END, else -> AI response -> back to human feedback
+    graph.add_conditional_edges(
+        "collect_feedback",
+        lambda state: "end" if state.get("user_satisfied") else "continue",
+        {
+            "end": END,
+            "continue": "respond_feedback"
+        }
+    )
+    graph.add_edge("respond_feedback","collect_feedback")
+    
     return graph.compile()
 
 def run_code_review(code_changes: List[dict]) -> dict:
@@ -46,7 +61,10 @@ def run_code_review(code_changes: List[dict]) -> dict:
         "severity_level": "low",
         "suggestions": [],
         "patterns": [],
-        "excluded_patterns": DEFAULT_EXCLUDED
+        "excluded_patterns": DEFAULT_EXCLUDED,
+        "human_feedback": "",
+        "user_satisfied": False,
+        "followup_response": ""
     }
     
     result = graph.invoke(initial_state)
@@ -183,12 +201,22 @@ def display_results(result):
     console.print("[bold green]REVIEW COMPLETE[/bold green]")
     console.print("="*80)
     
+    #AI Review
     console.print(Panel(
         result.get('summary', 'No summary generated'),
         title="[bold]Code Review Results[/bold]",
         border_style="green"
     ))
     
+    #AI response if there was feedback
+    if result.get('followup_response'):
+        console.print(Panel(
+            result['followup_response'],
+            title="[bold]AI Response to Your Feedback[/bold]",
+            border_style="blue"
+        ))
+
+    #comments
     if result.get('review_comments'):
         console.print("\n[bold]Detailed Comments:[/bold]")
         for comment in result['review_comments']:

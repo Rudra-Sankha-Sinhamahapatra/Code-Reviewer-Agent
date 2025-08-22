@@ -24,6 +24,9 @@ class ReviewBot(TypedDict):
     suggestions: List[str]
     patterns: List[str]
     excluded_patterns: List[str]
+    human_feedback: str
+    user_satisfied: bool
+    followup_response: str
 
 DEFAULT_EXCLUDED = [
     "*.pyc", "__pycache__", ".git", ".venv", "venv", "node_modules", 
