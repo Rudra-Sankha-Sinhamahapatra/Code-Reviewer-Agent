@@ -64,7 +64,8 @@ def run_code_review(code_changes: List[dict]) -> dict:
         "excluded_patterns": DEFAULT_EXCLUDED,
         "human_feedback": "",
         "user_satisfied": False,
-        "followup_response": ""
+        "followup_response": "",
+        "feedback_rounds": 0
     }
     
     result = graph.invoke(initial_state)
@@ -198,27 +199,26 @@ def interactive_mode():
 def display_results(result):
     """Display review results"""
     console.print("\n" + "="*80)
-    console.print("[bold green]REVIEW COMPLETE[/bold green]")
+    console.print("[bold green]FINAL REVIEW COMPLETE[/bold green]")
     console.print("="*80)
     
-    #AI Review
+    # Show final summary (only once)
     console.print(Panel(
         result.get('summary', 'No summary generated'),
-        title="[bold]Code Review Results[/bold]",
+        title="[bold]Final Code Review Summary[/bold]",
         border_style="green"
     ))
     
-    #AI response if there was feedback
-    if result.get('followup_response'):
+    if result.get('followup_response') and result.get('followup_response') != "✅ Review completed successfully!":
         console.print(Panel(
             result['followup_response'],
-            title="[bold]AI Response to Your Feedback[/bold]",
+            title="[bold]Final AI Response[/bold]",
             border_style="blue"
         ))
 
-    #comments
+    # Show all detailed comments
     if result.get('review_comments'):
-        console.print("\n[bold]Detailed Comments:[/bold]")
+        console.print("\n[bold]All Review Comments:[/bold]")
         for comment in result['review_comments']:
             severity_color = {
                 'low': 'green',

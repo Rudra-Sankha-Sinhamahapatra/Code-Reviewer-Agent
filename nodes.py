@@ -387,19 +387,24 @@ def collect_human_feedback(state: ReviewBot) -> ReviewBot:
     """Collect feedback from human user"""
     console.print("[bold cyan]Requesting human feedback...[/bold cyan]")
     
-    # Show current results
-    console.print(Panel(
-        state.get('summary', 'No summary generated'),
-        title="[bold]AI Review Results[/bold]",
-        border_style="green"
-    ))
 
+    feedback_rounds = state.get("feedback_rounds", 0)
+    if feedback_rounds == 0:
+        console.print(Panel(
+            state.get('summary', 'No summary generated'),
+            title="[bold]AI Review Results[/bold]",
+            border_style="green"
+        ))
+    
     console.print("\n[bold yellow]Your feedback (or 'done' to finish):[/bold yellow]")
     human_feedback = Prompt.ask("Enter your feedback")
 
     state["human_feedback"] = human_feedback
     user_satisfied_array = ['done', 'good', 'satisfied', 'fine', 'end']
     state["user_satisfied"] = human_feedback.lower() in user_satisfied_array
+
+    feedback_rounds = feedback_rounds + 1
+    state["feedback_rounds"] = feedback_rounds
 
     return state
 
@@ -413,38 +418,67 @@ def respond_to_feedback(state: ReviewBot) -> ReviewBot:
         state["followup_response"] = "✅ Review completed successfully!"
         return state
     
-    code_context = ""
-    file_names = []
-    for change in state.get("code_changes",[])[:3]:
-        file_names.append(change['file_path'])
-        code_context += f"File: {change['file_path']}\n{change['new_code'][:400]}...\n\n"
-
-    prompt = f"""The user is asking about their AI Code Reviewer system. Here's their feedback: "{human_feedback}"
-
-CURRENT SYSTEM FILES BEING REVIEWED:
-{code_context}
-
-FILES IN THIS REVIEW: {file_names}
-
-CURRENT REVIEW COMMENTS: {[c['comment'] for c in state.get('review_comments', [])[:5]]}
-
-The user seems to be asking about:
-- Whether their system makes multiple LLM calls
-- How the human feedback loop works  
-- Whether their nodes.py and main.py are working correctly
-- Technical details about their workflow
-
-Provide a technical response addressing their specific question about the system architecture and workflow. Be specific about:
-1. How many LLM calls are made
-2. The workflow sequence
-3. Whether the feedback loop is working as expected
-4. Any technical issues you notice
-
-Focus on answering their technical question directly."""
+    # STEP 1: First summarize the user's prompt to understand it better
+    console.print("[dim]Step 1: Understanding your request...[/dim]")
     
+    summarization_prompt = f"""USER PROMPT: "{human_feedback}"
+
+    TASK: Summarize what the user is asking for. Be specific about:
+    1. Are they asking about the review system/workflow?
+    2. Are they asking about specific code issues?
+    3. Are they asking for clarification or more details?
+    4. What exactly do they want to know?
+
+    Respond with: "User wants: [clear summary of their request]"
+
+    Keep it concise and focused."""
+
     try:
-        response = llm.invoke(prompt).content
+        summary_response = llm.invoke(summarization_prompt).content
+        console.print(f"[dim]Understanding: {summary_response}[/dim]")
+        
+        # STEP 2: Generate actual response based on the summary
+        console.print("[dim]Step 2: Generating response...[/dim]")
+        
+        code_context = ""
+        file_names = []
+        for change in state.get("code_changes",[])[:2]:
+            file_names.append(change['file_path'])
+            code_context += f"File: {change['file_path']}\n{change['new_code'][:300]}...\n\n"
+
+        # Main response prompt - completely generic
+        main_prompt = f"""USER REQUEST SUMMARY: {summary_response}
+
+        ORIGINAL USER FEEDBACK: "{human_feedback}"
+
+        CODE BEING REVIEWED:
+        {code_context}
+
+        FILES: {file_names}
+        REVIEW FINDINGS: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
+
+        SYSTEM INFO:
+        - This is a generic AI code reviewer for any programming language
+        - Workflow: Initial analysis → Human feedback loop → AI responses until satisfied
+        - Current feedback round: {state.get('feedback_rounds', 1)}
+        - I analyze user feedback in 2 steps: summarize intent → generate response
+
+        Based on the user's request, provide a helpful, specific answer. If they're asking about:
+        - System workflow: Explain the feedback loop clearly
+        - Code issues: Focus on the specific files and languages being reviewed  
+        - Clarification: Answer their exact question
+
+        Be direct and helpful. Work with any programming language."""
+
+        response = llm.invoke(main_prompt).content
         state["followup_response"] = response
+        
+        console.print("\n" + "="*60)
+        console.print("[bold blue]AI RESPONSE TO YOUR FEEDBACK:[/bold blue]")
+        console.print("="*60)
+        console.print(response)
+        console.print("="*60 + "\n")
+        
     except Exception as e:
         state["followup_response"] = f"Sorry, I couldn't process your feedback: {e}"
     

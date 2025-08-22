@@ -27,6 +27,7 @@ class ReviewBot(TypedDict):
     human_feedback: str
     user_satisfied: bool
     followup_response: str
+    feedback_rounds: int
 
 DEFAULT_EXCLUDED = [
     "*.pyc", "__pycache__", ".git", ".venv", "venv", "node_modules", 
