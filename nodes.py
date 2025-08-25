@@ -1,4 +1,3 @@
-
 import json
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -13,18 +12,21 @@ load_dotenv()
 console = Console()
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash",
-    temperature=0.1,
+    temperature=0.5,
     max_output_tokens=4000
 )
 
 def analyze_code_changes(state: ReviewBot) -> ReviewBot:
-    """Analyzes code changes for style, complexity, and documentation issues"""
+    """Enhanced: Analyzes code changes with optional focused re-review"""
     console.print("[bold cyan]Analyzing code changes...[/bold cyan]")
 
     if not state.get("code_changes"):
         console.print("[yellow]No code changes to analyze[/yellow]")
         return state
 
+    rereview_focus = state.get("rereview_focus", "")
+    if rereview_focus:
+        console.print(f"[yellow]🔄 Re-analyzing with focus: {rereview_focus}[/yellow]")
 
     changes_text = ""
     for i, change in enumerate(state["code_changes"][:4]): #Limit is 4, only it will review first 4 files
@@ -36,12 +38,27 @@ def analyze_code_changes(state: ReviewBot) -> ReviewBot:
         changes_text += f"Code:\n{new_code}\n"
         changes_text += "-" * 40 + "\n"
 
-    prompt = f"""You are an expert code reviewer in the Industry who only returns JSON object
 
-CODE CHANGES:
-{changes_text}
-
-REVIEW INSTRUCTIONS:
+    if rereview_focus and any(word in rereview_focus.lower() for word in ['performance', 'optimization', 'speed']):
+        analysis_focus = """
+SPECIAL FOCUS: PERFORMANCE ANALYSIS
+- Check for inefficient loops and algorithms  
+- Identify potential bottlenecks
+- Look for unnecessary database calls
+- Check for blocking operations
+- Assess memory usage patterns
+"""
+    elif rereview_focus and any(word in rereview_focus.lower() for word in ['security', 'vulnerability']):
+        analysis_focus = """
+SPECIAL FOCUS: SECURITY ANALYSIS  
+- Look for injection vulnerabilities
+- Check for authentication/authorization issues
+- Identify hardcoded credentials
+- Assess input validation
+- Check for unsafe operations
+"""
+    else:
+        analysis_focus = """
 1. Code Quality:
    - Check for clean code principles
    - Identify complexity issues
@@ -53,6 +70,15 @@ REVIEW INSTRUCTIONS:
    - Check resource management
    - Review API design
    - Assess testability
+"""
+
+    prompt = f"""You are an expert code reviewer in the Industry who only returns JSON object
+
+CODE CHANGES:
+{changes_text}
+
+REVIEW INSTRUCTIONS:
+{analysis_focus}
 
 IMPORTANT: You must respond with ONLY valid JSON in the exact format below. Do not include any text before or after the JSON.
 
@@ -152,27 +178,33 @@ IMPORTANT: You must respond with ONLY valid JSON in the exact format below. Do n
     return state
 
 def detect_code_patterns(state: ReviewBot) -> ReviewBot:
-    """Detects anti-patterns and common issues across multiple languages"""
+    """Enhanced: Detects patterns with optional focused analysis"""
     console.print("[bold cyan]Detecting code patterns...[/bold cyan]")
     
     if not state.get("code_changes"):
         console.print("[yellow]No code changes to analyze for patterns[/yellow]")
         return state
     
-    #  patterns that work across languages
+    # Check if this is focused re-review
+    rereview_focus = state.get("rereview_focus", "")
+    if rereview_focus and "pattern" in rereview_focus.lower():
+        console.print("[yellow]🔍 Pattern-focused analysis[/yellow]")
+    
+    # Enhanced patterns that work across languages
     ANTI_PATTERNS = {
-        "debug_statements": ["print(", "console.log(", "console.error(", "println!", "fmt.print", "cout <<"],
+        "debug_statements": ["print(", "console.log(", "console.error(", "println!", "fmt.print", "cout <<", "System.out.print"],
         "todo_comments": ["todo", "fixme", "hack", "xxx", "note:", "bug:"],
         "large_files": 100,  # lines threshold
         "long_lines": 120,   # character threshold
-        "magic_numbers": ["= 42", "= 100", "= 1000", "* 24", "* 60", "* 365"]
+        "magic_numbers": ["= 42", "= 100", "= 1000", "* 24", "* 60", "* 365"],
+        "performance_issues": ["for i in range(len(", "while true:", "time.sleep(", "Thread.sleep(", "setTimeout("]
     }
     
     GOOD_PATTERNS = {
-        "tests": ["test_", "it(", "describe(", "should", "expect(", "_test."],
-        "error_handling": ["try", "catch", "except", "Result<", "Option<", "?."],
-        "documentation": ["/**", "///", '"""', "# ", "//"],
-        "type_safety": [": string", ": number", ": bool", "String", "Option", "Result"]
+        "tests": ["test_", "it(", "describe(", "should", "expect(", "_test.", "Test", "spec"],
+        "error_handling": ["try", "catch", "except", "Result<", "Option<", "?.", "throw", "raise"],
+        "documentation": ["/**", "///", '"""', "# ", "//", "@param", "@return"],
+        "type_safety": [": string", ": number", ": bool", "String", "Option", "Result", "<T>", "interface"]
     }
     
     patterns_found = []
@@ -204,11 +236,10 @@ def detect_code_patterns(state: ReviewBot) -> ReviewBot:
             if found_keywords:
                 patterns_found.append(f"{pattern_type.replace('_', ' ').title()} in {file_path}")
     
-   
     state["patterns"] = patterns_found
     existing_comments = state.get("review_comments", [])
     
-    # anti-patterns as comments
+    # Add anti-patterns as comments
     for anti_pattern in anti_patterns:
         existing_comments.append(ReviewComment(
             file_path="pattern_analysis",
@@ -224,12 +255,16 @@ def detect_code_patterns(state: ReviewBot) -> ReviewBot:
     return state
 
 def check_security_issues(state: ReviewBot) -> ReviewBot:
-    """Checks for security vulnerabilities"""
+    """Enhanced: Security check with optional focused analysis"""
     console.print("[bold cyan]Checking security...[/bold cyan]")
     
     if not state.get("code_changes"):
         console.print("[yellow]No code changes to check for security issues[/yellow]")
         return state
+    
+    rereview_focus = state.get("rereview_focus", "")
+    if rereview_focus and "security" in rereview_focus.lower():
+        console.print("[yellow]🔒 Security-focused analysis[/yellow]")
     
     security_issues = []
     existing_comments = state.get("review_comments", [])
@@ -242,16 +277,17 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
         for line_num, line in enumerate(lines, 1):
             line_lower = line.lower().strip()
             
-            #Skip empty lines or comments
+           
             if not line_lower or line_lower.startswith('#') or line_lower.startswith('//'):
                 continue
             
-            secret_indicators = ['password', 'api_key', 'secret_key', 'token', 'apikey']
+        
+            secret_indicators = ['password', 'api_key', 'secret_key', 'token', 'apikey', 'private_key']
+            
             # Check for hardcoded secrets
             if any(secret in line_lower for secret in secret_indicators):
                 if '=' in line and any(quote in line for quote in ['"', "'"]):
                     value_part = line.split('=',1)[1].strip()
-
                     if not any(skip in value_part.lower() for skip in ['getenv', 'env.', 'process.env', 'config.', '${', 'none', 'null', '""', "''"]):
                       security_issues.append({
                         "file": file_path,
@@ -260,13 +296,11 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
                         "severity": "high"
                     })
             
-            # Check for SQL injection patterns
+            # SQL injection patterns (multi-language)
             sql_keywords = ['select ', 'insert ', 'update ', 'delete ', 'drop ', 'create ']
             if any(sql in line_lower for sql in sql_keywords):
-                # Only flag if there's string formatting or concatenation
-                if any(pattern in line for pattern in ['f"', "f'", '.format(', '%s', '%d', '+ ', '+=']):
-                    # Skip if using parameterized queries
-                    if not any(safe in line_lower for safe in ['execute(', 'prepare(', '?', ':param']):
+                if any(pattern in line for pattern in ['f"', "f'", '.format(', '%s', '%d', '+ ', '+=', '${', '`${', 'String.format']):
+                    if not any(safe in line_lower for safe in ['execute(', 'prepare(', '?', ':param', 'bindparam']):
                         security_issues.append({
                             "file": file_path,
                             "line": line_num,
@@ -274,11 +308,10 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
                             "severity": "critical"
                         })
             
-            # Check for unsafe file operations
-            unsafe_functions = ['eval(', 'exec(', 'compile(']
+            # Unsafe functions (multi-language)
+            unsafe_functions = ['eval(', 'exec(', 'compile(', 'system(', 'shell_exec(', 'Runtime.exec(']
             if any(func in line_lower for func in unsafe_functions):
-                # Skip if it's in comments or strings
-                if not any(marker in line for marker in ['#', '//', '"""', "'''"]):
+                if not any(marker in line for marker in ['#', '//', '"""', "'''", '/*']):
                     security_issues.append({
                         "file": file_path,
                         "line": line_num,
@@ -286,9 +319,9 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
                         "severity": "high"
                     })
             
-            # File path traversal detection
+            # Path traversal (any language)
             if any(pattern in line_lower for pattern in ['../', '../', '..\\', 'traversal']):
-                if 'open(' in line_lower or 'file(' in line_lower:
+                if any(func in line_lower for func in ['open(', 'file(', 'readfile(', 'include(', 'require(']):
                     security_issues.append({
                         "file": file_path,
                         "line": line_num,
@@ -296,7 +329,7 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
                         "severity": "medium"
                     })
     
-
+    # Add security issues to comments
     for issue in security_issues:
         security_comment = ReviewComment(
             file_path=issue["file"],
@@ -313,25 +346,25 @@ def check_security_issues(state: ReviewBot) -> ReviewBot:
     
     return state
 
-
 def generate_review_feedback(state: ReviewBot) -> ReviewBot:
-    """Generates final review feedback"""
+    """Enhanced: Generates feedback with re-review context"""
     console.print("[bold cyan]Generating feedback...[/bold cyan]")
     
     comments = state.get("review_comments", [])
     patterns = state.get("patterns", [])
+    rereview_focus = state.get("rereview_focus", "")
 
     if not comments:
-        state["summary"] = "✅ Code review complete: No significant issues found!"
+        base_message = "✅ Code review complete: No significant issues found!"
+        if rereview_focus:
+            base_message = f"✅ Re-review complete ({rereview_focus}): No additional issues found!"
+        
+        state["summary"] = base_message
         state["suggestions"] = [
             "Code appears to follow good practices",
             "Consider adding more documentation if needed",
             "Keep up the good work!"
         ]
-        return state
-    
-    if not state.get("review_comments"):
-        state["summary"] = "No issues found in the code changes."
         return state
     
     critical = [c for c in comments if c["severity"] == "critical"]
@@ -342,18 +375,24 @@ def generate_review_feedback(state: ReviewBot) -> ReviewBot:
     security_issues = [c for c in comments if c["category"] == "security"]
     best_practice_issues = [c for c in comments if c["category"] == "best_practice"]
     code_smell_issues = [c for c in comments if c["category"] == "code_smell"]
+    performance_issues = [c for c in comments if c["category"] == "performance"]
 
     suggestions = []
     if critical or high:
         suggestions.append("🔴 URGENT: Address critical and high-severity issues immediately")
     if security_issues:
         suggestions.append("🔒 SECURITY: Review and fix all security vulnerabilities")
+    if performance_issues:
+        suggestions.append("⚡ PERFORMANCE: Optimize identified performance bottlenecks")
     if medium:
         suggestions.append("🟡 Address medium-priority issues before next release")
     if best_practice_issues:
         suggestions.append("📚 Consider improving code following best practices")
 
-    summary = f"""📊 Code Review Summary:
+    # Add re-review context to summary
+    review_type = f"🔄 Re-Review ({rereview_focus})" if rereview_focus else "📊 Code Review"
+    
+    summary = f"""{review_type} Summary:
 
 🔍 ANALYSIS RESULTS:
 • Total Issues: {len(comments)}
@@ -361,15 +400,15 @@ def generate_review_feedback(state: ReviewBot) -> ReviewBot:
 
 📂 BY CATEGORY:
 • Security Issues: {len(security_issues)}
+• Performance Issues: {len(performance_issues)}
 • Best Practice Issues: {len(best_practice_issues)}
 • Code Smells: {len(code_smell_issues)}
-• Other Issues: {len(comments) - len(security_issues) - len(best_practice_issues) - len(code_smell_issues)}
+• Other Issues: {len(comments) - len(security_issues) - len(performance_issues) - len(best_practice_issues) - len(code_smell_issues)}
 
 🎯 GOOD PATTERNS FOUND: {len(patterns)}
 
 🚨 TOP PRIORITY ISSUES:"""
     
- 
     priority_issues = sorted(comments, key=lambda x: {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(x["severity"], 0), reverse=True)
     
     for i, issue in enumerate(priority_issues[:5], 1):
@@ -384,10 +423,9 @@ def generate_review_feedback(state: ReviewBot) -> ReviewBot:
     return state
 
 def collect_human_feedback(state: ReviewBot) -> ReviewBot:
-    """Collect feedback from human user"""
+    """Enhanced: Collect feedback and handle re-review requests"""
     console.print("[bold cyan]Requesting human feedback...[/bold cyan]")
     
-
     feedback_rounds = state.get("feedback_rounds", 0)
     if feedback_rounds == 0:
         console.print(Panel(
@@ -403,13 +441,23 @@ def collect_human_feedback(state: ReviewBot) -> ReviewBot:
     user_satisfied_array = ['done', 'good', 'satisfied', 'fine', 'end']
     state["user_satisfied"] = human_feedback.lower() in user_satisfied_array
 
+    feedback_lower = human_feedback.lower()
+    rereview_keywords = ['review again', 're-analyze', 'fresh review', 'check again', 'focus on', 'analyze', 'check for','re review']
+    
+    if any(keyword in feedback_lower for keyword in rereview_keywords) and not state.get("user_satisfied"):
+        state["needs_rereview"] = True
+        state["rereview_focus"] = human_feedback
+        console.print("[yellow]🔄 Re-review requested![/yellow]")
+    else:
+        state["needs_rereview"] = False
+
     feedback_rounds = feedback_rounds + 1
     state["feedback_rounds"] = feedback_rounds
 
     return state
 
 def respond_to_feedback(state: ReviewBot) -> ReviewBot:
-    """Generate AI response to human feedback"""
+    """Enhanced: Handle feedback and provide code fixes"""
     console.print("[bold cyan]Processing your feedback...[/bold cyan]")
 
     human_feedback = state.get("human_feedback","")
@@ -418,69 +466,104 @@ def respond_to_feedback(state: ReviewBot) -> ReviewBot:
         state["followup_response"] = "✅ Review completed successfully!"
         return state
     
-    # STEP 1: First summarize the user's prompt to understand it better
-    console.print("[dim]Step 1: Understanding your request...[/dim]")
-    
-    summarization_prompt = f"""USER PROMPT: "{human_feedback}"
-
-    TASK: Summarize what the user is asking for. Be specific about:
-    1. Are they asking about the review system/workflow?
-    2. Are they asking about specific code issues?
-    3. Are they asking for clarification or more details?
-    4. What exactly do they want to know?
-
-    Respond with: "User wants: [clear summary of their request]"
-
-    Keep it concise and focused."""
-
-    try:
-        summary_response = llm.invoke(summarization_prompt).content
-        console.print(f"[dim]Understanding: {summary_response}[/dim]")
+    if state.get("needs_rereview"):
+        focus = state.get("rereview_focus", "")
+        console.print(f"[yellow]🔄 Performing re-review: {focus}[/yellow]")
         
-        # STEP 2: Generate actual response based on the summary
-        console.print("[dim]Step 2: Generating response...[/dim]")
-        
-        code_context = ""
-        file_names = []
-        for change in state.get("code_changes",[])[:2]:
-            file_names.append(change['file_path'])
-            code_context += f"File: {change['file_path']}\n{change['new_code'][:300]}...\n\n"
-
-        # Main response prompt - completely generic
-        main_prompt = f"""USER REQUEST SUMMARY: {summary_response}
-
-        ORIGINAL USER FEEDBACK: "{human_feedback}"
-
-        CODE BEING REVIEWED:
-        {code_context}
-
-        FILES: {file_names}
-        REVIEW FINDINGS: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
-
        
-        CONTEXT:
-        - This is a code reviewer for any programming language/github repository
-        - Current feedback round: {state.get('feedback_rounds', 1)}
-        - User can ask questions about their code, request specific analysis, or ask for clarifications
-
-        IMPORTANT INSTRUCTIONS:
-        - DO NOT mention any internal processing steps
-        - Focus ONLY on answering their specific question about their code/review
-        - If they ask about workflow of a code or project, explain what THEY see 
-        - If they ask about their specific code, analyze the files they're reviewing
-
-        Based on the user's request, provide a helpful, direct answer focused on their code and review."""
-
-        response = llm.invoke(main_prompt).content
+        state["review_comments"] = []
+        
+        focus_lower = focus.lower()
+        if any(word in focus_lower for word in ['security', 'vulnerability', 'injection', 'auth']):
+            state = check_security_issues(state)
+        elif any(word in focus_lower for word in ['pattern', 'best practice', 'code smell']):
+            state = detect_code_patterns(state)
+        else:
+      
+            state = analyze_code_changes(state)
+            state = detect_code_patterns(state)
+            state = check_security_issues(state)
+        
+        state = generate_review_feedback(state)
+        
+        state["needs_rereview"] = False
+        state["rereview_focus"] = ""
+        
+        response = "🔄 **FRESH ANALYSIS COMPLETE**\n\n" + state.get('summary', '')
         state["followup_response"] = response
         
-        console.print("\n" + "="*60)
-        console.print("[bold blue]AI RESPONSE TO YOUR FEEDBACK:[/bold blue]")
-        console.print("="*60)
-        console.print(response)
-        console.print("="*60 + "\n")
+    else:
+        # STEP 1: Understand request
+        console.print("[dim]Step 1: Understanding your request...[/dim]")
         
-    except Exception as e:
-        state["followup_response"] = f"Sorry, I couldn't process your feedback: {e}"
+        summarization_prompt = f"""USER PROMPT: "{human_feedback}"
+
+        Determine what they want:
+        "CODEFIX" if they want specific code fixes/solutions
+        "CLARIFY" if they want clarification about findings
+        "WORKFLOW" if they ask about the system
+        "GENERAL" for other questions"""
+
+        try:
+            summary_response = llm.invoke(summarization_prompt).content
+            console.print(f"[dim]Understanding: {summary_response}[/dim]")
+            
+            # STEP 2: Generate response
+            console.print("[dim]Step 2: Generating response...[/dim]")
+            
+            code_context = ""
+            file_names = []
+            for change in state.get("code_changes",[])[:2]:
+                file_names.append(change['file_path'])
+                code_context += f"File: {change['file_path']}\n{change['new_code'][:500]}...\n\n"
+
+            if "CODEFIX" in summary_response:
+                main_prompt = f"""USER REQUEST: {human_feedback}
+
+                CODE BEING REVIEWED:
+                {code_context}
+
+                CURRENT ISSUES FOUND:
+                {[f"{c['file_path']}:{c['line_number']} - {c['comment']}" for c in state.get('review_comments', [])[:5]]}
+
+                TASK: Provide SPECIFIC CODE FIXES with exact line numbers and replacement code.
+
+                Format your response like this:
+                
+                📝 CODE FIXES SUGGESTED:
+
+                File: [filename]
+                Line [X]: [current problematic code]
+                Fix: [exact replacement code]  
+                Reason: [why this fix is needed]
+
+                Be specific and actionable. Only suggest fixes for real issues found."""
+
+            else:
+                main_prompt = f"""USER REQUEST: {human_feedback}
+
+                CODE BEING REVIEWED:
+                {code_context}
+
+                FILES: {file_names}
+                REVIEW FINDINGS: {[c['comment'] for c in state.get('review_comments', [])[:3]]}
+
+                CONTEXT:
+                - This is a code reviewer for any programming language/repository
+                - Current feedback round: {state.get('feedback_rounds', 1)}
+
+                Provide a helpful answer focused on their request."""
+
+            response = llm.invoke(main_prompt).content
+            state["followup_response"] = response
+            
+        except Exception as e:
+            state["followup_response"] = f"Sorry, I couldn't process your feedback: {e}"
+        
+    console.print("\n" + "="*60)
+    console.print("[bold blue]AI RESPONSE TO YOUR FEEDBACK:[/bold blue]")
+    console.print("="*60)
+    console.print(state["followup_response"])
+    console.print("="*60 + "\n")
     
     return state
