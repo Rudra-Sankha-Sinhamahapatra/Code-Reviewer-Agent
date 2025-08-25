@@ -40,9 +40,14 @@ def create_review_graph():
    # Conditional edge: if satisfied -> END, else -> AI response -> back to human feedback
     graph.add_conditional_edges(
         "collect_feedback",
-        lambda state: "end" if state.get("user_satisfied") else "continue",
+        lambda state: (
+            "end" if state.get("user_satisfied") else
+            "analyze_changes" if state.get("needs_rereview") else  # Re-route to existing nodes!
+            "continue"
+        ),
         {
             "end": END,
+            "analyze_changes": "analyze_changes",  # Re-review path using existing nodes
             "continue": "respond_feedback"
         }
     )
@@ -65,7 +70,9 @@ def run_code_review(code_changes: List[dict]) -> dict:
         "human_feedback": "",
         "user_satisfied": False,
         "followup_response": "",
-        "feedback_rounds": 0
+        "feedback_rounds": 0,
+        "needs_rereview": False,
+        "rereview_focus": ""
     }
     
     result = graph.invoke(initial_state)
@@ -93,8 +100,8 @@ def run_github_review(repo_name: str, branch: str = "main") -> dict:
         # Convert to our format
         code_changes = []
         for file in files:
-            if file["content"] and file["path"].endswith(('.py', '.js','.ts', '.java', '.cpp', '.c', '.h','.rs')):
-                # Limit file size to prevent overwhelming the AI (max 2000 characters per file)
+            if file["content"] and file["path"].endswith(('.py', '.js','.ts', '.java', '.go', '.cpp', '.c', '.h','.rs')):
+
                 content = file["content"]
                 if len(content) > 2000:
                     content = content[:2000] + "\n... (file truncated for analysis)"
